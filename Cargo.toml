@@ -1,0 +1,13 @@
+[package]
+name = "brut"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { version = "1.0.89", features = ["backtrace"] }
+camino = "1.1.9"
+cargo = "0.82.0"
+cargo-lock = { version = "9.0.0", features = ["dependency-tree"] }
+clap = { version = "4.5.17", features = ["derive"] }
+clean-path = "0.2.1"
+petgraph = "0.6.5"
