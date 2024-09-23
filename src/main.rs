@@ -13,6 +13,7 @@ use std::env::current_dir;
 use std::fs;
 use which::which;
 
+mod config;
 mod git;
 mod graph;
 
@@ -81,14 +82,34 @@ fn make_absolute(path: &Utf8Path, cwd: &Utf8Path) -> Utf8PathBuf {
     clean(path).try_into().unwrap()
 }
 
+fn make_relative(path: &Utf8Path, cwd: &Utf8Path) -> Result<Utf8PathBuf, anyhow::Error> {
+    let cleaned_path: Utf8PathBuf = clean(path).try_into()?;
+
+    if cleaned_path.is_absolute() {
+        Ok(path.strip_prefix(cwd)?.to_path_buf())
+    } else {
+        Ok(cleaned_path)
+    }
+}
+
 fn get_crates_from_files(
     cwd: &Utf8Path,
     workspace: &Workspace,
+    global_deps_matcher: &globset::GlobSet,
     files: &HashSet<Utf8PathBuf>,
 ) -> Result<HashSet<cargo::core::PackageId>, anyhow::Error> {
     let mut crates = HashSet::new();
 
     for file in files {
+        let relative = make_relative(file, cwd)?;
+        // If we hit a global dependency, we return all packages
+        if global_deps_matcher.is_match(&relative) {
+            for package in workspace.members() {
+                crates.insert(package.package_id());
+            }
+            return Ok(crates);
+        }
+
         let file = make_absolute(file, cwd);
         for package in workspace.members() {
             if file.starts_with(package.root()) {
@@ -157,8 +178,11 @@ fn main() -> Result<(), anyhow::Error> {
     let workspace_root = find_lockfile_dir(&cwd).ok_or(anyhow::anyhow!("No Cargo.lock found"))?;
 
     let ws = Workspace::new(workspace_root.join("Cargo.toml").as_std_path(), &ctx)?;
+    let config = config::Config::load(&workspace_root, &ws)?.unwrap_or_default();
+    let global_deps_matcher = config.global_deps_matcher()?;
+
     // This probably breaks if the workspace root is not the git root
-    let pkgs = get_crates_from_files(&git_root, &ws, &files)?;
+    let pkgs = get_crates_from_files(&git_root, &ws, &global_deps_matcher, &files)?;
 
     let lockfile = Lockfile::load(workspace_root.join("Cargo.lock").as_std_path())?;
     let tree = lockfile.dependency_tree()?;

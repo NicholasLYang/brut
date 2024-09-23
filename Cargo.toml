@@ -12,5 +12,8 @@ clap = { version = "4.5.17", features = ["derive"] }
 clean-path = "0.2.1"
 colored = "2.1.0"
 git2 = "0.19.0"
+globset = "0.4.15"
 petgraph = "0.6.5"
+serde = { version = "1.0.210", features = ["derive"] }
+toml = "0.8.19"
 which = "6.0.3"

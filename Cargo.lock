@@ -199,7 +199,10 @@ dependencies = [
  "clean-path",
  "colored",
  "git2",
+ "globset",
  "petgraph",
+ "serde",
+ "toml 0.8.19",
  "which",
 ]
 
