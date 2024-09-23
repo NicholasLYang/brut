@@ -6,6 +6,7 @@ use cargo::GlobalContext;
 use cargo_lock::Lockfile;
 use clap::Parser;
 use clean_path::clean;
+use colored::Colorize;
 use git2::Repository;
 use std::collections::HashSet;
 use std::env::current_dir;
@@ -18,15 +19,37 @@ mod graph;
 #[derive(Debug, Parser)]
 enum Command {
     Build {
-        /// The base git branch, defaults to `main`
-        #[clap(long)]
-        base: Option<String>,
-        /// The git head, defaults to `HEAD`
-        #[clap(long)]
-        head: Option<String>,
-        #[clap(long)]
-        dry_run: bool,
+        #[clap(flatten)]
+        args: CommandArgs,
     },
+    Check {
+        #[clap(flatten)]
+        args: CommandArgs,
+    },
+    Clippy {
+        #[clap(flatten)]
+        args: CommandArgs,
+    },
+    Run {
+        #[clap(flatten)]
+        args: CommandArgs,
+    },
+    Test {
+        #[clap(flatten)]
+        args: CommandArgs,
+    },
+}
+
+#[derive(Debug, Parser, Clone)]
+struct CommandArgs {
+    /// The base git branch, defaults to `main`
+    #[clap(long)]
+    base: Option<String>,
+    /// The git head, defaults to `HEAD`
+    #[clap(long)]
+    head: Option<String>,
+    #[clap(long)]
+    dry_run: bool,
 }
 
 #[derive(Debug, Parser)]
@@ -77,19 +100,29 @@ fn get_crates_from_files(
     Ok(crates)
 }
 
-fn execute_build(
+fn execute_command(
     workspace_root: &Utf8Path,
+    cargo_command: &str,
     dependents: &HashSet<String>,
+    dry_run: bool,
 ) -> Result<(), anyhow::Error> {
     let mut command = std::process::Command::new(which("cargo")?);
 
-    command.arg("build").current_dir(workspace_root);
+    command.arg(cargo_command).current_dir(workspace_root);
 
     for pkg in dependents {
         command.arg("-p").arg(pkg);
     }
 
-    command.spawn()?;
+    if dry_run {
+        println!(
+            "{} {}",
+            "Command:".green().bold(),
+            format!("{:?}", command).dimmed()
+        );
+    } else {
+        command.spawn()?;
+    }
 
     Ok(())
 }
@@ -104,45 +137,57 @@ fn main() -> Result<(), anyhow::Error> {
         current_dir()?.try_into()?
     };
 
-    match args.command {
-        Command::Build {
-            base,
-            head,
-            dry_run,
-        } => {
-            let base = base.as_deref().unwrap_or("main");
-            let repo = Repository::discover(&cwd)?;
-            let git_root: &Utf8Path = repo
-                .workdir()
-                .expect("git has working directory")
-                .try_into()?;
+    let (args, command) = match args.command {
+        Command::Build { args } => (args, "build"),
+        Command::Check { args } => (args, "check"),
+        Command::Clippy { args } => (args, "clippy"),
+        Command::Run { args } => (args, "run"),
+        Command::Test { args } => (args, "test"),
+    };
 
-            let files = get_changed_files(&repo, base, head)?;
+    let base = args.base.as_deref().unwrap_or("main");
+    let repo = Repository::discover(&cwd)?;
+    let git_root: &Utf8Path = repo
+        .workdir()
+        .expect("git has working directory")
+        .try_into()?;
 
-            let workspace_root =
-                find_lockfile_dir(&cwd).ok_or(anyhow::anyhow!("No Cargo.lock found"))?;
+    let files = get_changed_files(&repo, base, args.head)?;
 
-            let ws = Workspace::new(workspace_root.join("Cargo.toml").as_std_path(), &ctx)?;
-            // This probably breaks if the workspace root is not the git root
-            let pkgs = get_crates_from_files(&git_root, &ws, &files)?;
+    let workspace_root = find_lockfile_dir(&cwd).ok_or(anyhow::anyhow!("No Cargo.lock found"))?;
 
-            let lockfile = Lockfile::load(workspace_root.join("Cargo.lock").as_std_path())?;
-            let tree = lockfile.dependency_tree()?;
-            let mut dependents = HashSet::new();
+    let ws = Workspace::new(workspace_root.join("Cargo.toml").as_std_path(), &ctx)?;
+    // This probably breaks if the workspace root is not the git root
+    let pkgs = get_crates_from_files(&git_root, &ws, &files)?;
 
-            for pkg in pkgs {
-                dependents.insert(pkg.name().to_string());
-                dependents.extend(get_dependents_of_pkg(&tree, pkg)?);
-            }
+    let lockfile = Lockfile::load(workspace_root.join("Cargo.lock").as_std_path())?;
+    let tree = lockfile.dependency_tree()?;
+    let mut dependents = HashSet::new();
 
-            if dry_run {
-                println!("Changed files: {:?}", files);
-                println!("Affected packages: {:?}", dependents);
-            } else {
-                execute_build(&workspace_root, &dependents)?;
-            }
-        }
+    for pkg in pkgs {
+        dependents.insert(pkg.name().to_string());
+        dependents.extend(get_dependents_of_pkg(&tree, pkg)?);
     }
+
+    if args.dry_run {
+        println!(
+            "{} {}",
+            "Changed files:".green().bold(),
+            format!("{:?}", files).dimmed()
+        );
+        println!(
+            "{} {}",
+            "Affected packages:".green().bold(),
+            format!("{:?}", dependents).dimmed()
+        );
+    }
+
+    if dependents.is_empty() {
+        println!("{}", "No affected packages, skipping".blue().bold());
+        return Ok(());
+    }
+
+    execute_command(&workspace_root, command, &dependents, args.dry_run)?;
 
     Ok(())
 }
