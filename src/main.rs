@@ -16,6 +16,7 @@ use which::which;
 mod config;
 mod git;
 mod graph;
+mod lockfile;
 
 #[derive(Debug, Parser)]
 enum Command {
@@ -186,11 +187,21 @@ fn main() -> Result<(), anyhow::Error> {
 
     let lockfile = Lockfile::load(workspace_root.join("Cargo.lock").as_std_path())?;
     let tree = lockfile.dependency_tree()?;
+
     let mut dependents = HashSet::new();
 
     for pkg in pkgs {
         dependents.insert(pkg.name().to_string());
         dependents.extend(get_dependents_of_pkg(&tree, pkg)?);
+    }
+
+    if files.contains(Utf8Path::new("Cargo.lock")) {
+        dependents.extend(lockfile::get_changed_packages_from_lockfile(
+            &repo,
+            &ws,
+            &lockfile,
+            args.base.as_deref().unwrap_or("main"),
+        )?);
     }
 
     if args.dry_run {
