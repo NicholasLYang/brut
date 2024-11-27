@@ -17,7 +17,7 @@ pub fn get_changed_packages_from_lockfile(
     let mut changed_packages = HashSet::new();
     for pkg in ws.members() {
         if pkg.package_id().source_id().is_path()
-            && compare_package_between_lockfiles(
+            && package_has_changed(
                 base_lockfile.dependency_tree()?,
                 head_lockfile.dependency_tree()?,
                 &Dependency {
@@ -61,12 +61,12 @@ struct LockfileEntry {
 }
 
 /// Compares a package's dependencies between two lockfiles
-fn compare_package_between_lockfiles(
+fn package_has_changed(
     old_lockfile: Tree,
     new_lockfile: Tree,
-    pkg: &cargo_lock::dependency::Dependency,
+    pkg: &Dependency,
 ) -> Result<bool, anyhow::Error> {
-    // If the package is not in the new lockfile, it's not affected
+    // If the package is not in the new lockfile, we ignore it (we assume the Cargo.toml has changed)
     let Some(new_pkg_idx) = new_lockfile.nodes().get(&pkg) else {
         return Ok(false);
     };
@@ -97,14 +97,14 @@ fn compare_package_between_lockfiles(
         .collect::<HashSet<_>>();
 
     if lockfile_deps.len() != new_lockfile_deps.len() {
-        return Ok(false);
+        return Ok(true);
     }
 
     for dep in lockfile_deps {
         if !new_lockfile_deps.contains(&dep) {
-            return Ok(false);
+            return Ok(true);
         }
     }
 
-    Ok(true)
+    Ok(false)
 }
