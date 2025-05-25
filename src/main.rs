@@ -1,11 +1,11 @@
 use crate::git::get_changed_files;
 use crate::graph::get_dependents_of_pkg;
+use crate::path::{AbsolutePathBuf, RelativePathBuf};
 use camino::{Utf8Path, Utf8PathBuf};
 use cargo::core::Workspace;
 use cargo::GlobalContext;
 use cargo_lock::Lockfile;
 use clap::Parser;
-use clean_path::clean;
 use colored::Colorize;
 use git2::Repository;
 use std::collections::HashSet;
@@ -17,6 +17,7 @@ mod config;
 mod git;
 mod graph;
 mod lockfile;
+mod path;
 
 #[derive(Debug, Parser)]
 enum Command {
@@ -73,26 +74,6 @@ fn find_lockfile_dir(path: &Utf8Path) -> Option<Utf8PathBuf> {
     None
 }
 
-fn make_absolute(path: &Utf8Path, cwd: &Utf8Path) -> Utf8PathBuf {
-    let path = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        cwd.join(path)
-    };
-
-    clean(path).try_into().unwrap()
-}
-
-fn make_relative(path: &Utf8Path, cwd: &Utf8Path) -> Result<Utf8PathBuf, anyhow::Error> {
-    let cleaned_path: Utf8PathBuf = clean(path).try_into()?;
-
-    if cleaned_path.is_absolute() {
-        Ok(path.strip_prefix(cwd)?.to_path_buf())
-    } else {
-        Ok(cleaned_path)
-    }
-}
-
 fn get_crates_from_files(
     cwd: &Utf8Path,
     workspace: &Workspace,
@@ -102,16 +83,16 @@ fn get_crates_from_files(
     let mut crates = HashSet::new();
 
     for file in files {
-        let relative = make_relative(file, cwd)?;
+        let relative = RelativePathBuf::from_unknown(file, cwd)?;
         // If we hit a global dependency, we return all packages
-        if global_deps_matcher.is_match(&relative) {
+        if global_deps_matcher.is_match(&*relative) {
             for package in workspace.members() {
                 crates.insert(package.package_id());
             }
             return Ok(crates);
         }
 
-        let file = make_absolute(file, cwd);
+        let file = AbsolutePathBuf::from_unknown(file, cwd);
         for package in workspace.members() {
             if file.starts_with(package.root()) {
                 crates.insert(package.package_id());
@@ -139,7 +120,7 @@ fn execute_command(
     if dry_run {
         println!(
             "{} {}",
-            "Command:".green().bold(),
+            "Command:".bold(),
             format!("{:?}", command).dimmed()
         );
     } else {
@@ -207,12 +188,12 @@ fn main() -> Result<(), anyhow::Error> {
     if args.dry_run {
         println!(
             "{} {}",
-            "Changed files:".green().bold(),
+            "Changed files:".bold(),
             format!("{:?}", files).dimmed()
         );
         println!(
             "{} {}",
-            "Affected packages:".green().bold(),
+            "Affected packages:".bold(),
             format!("{:?}", dependents).dimmed()
         );
     }
