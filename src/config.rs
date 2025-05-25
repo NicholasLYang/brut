@@ -39,6 +39,9 @@ impl Config {
         for dep in &self.global_dependencies {
             builder.add(Glob::new(dep)?);
         }
+        // These are automatic global dependencies
+        builder.add(Glob::new("brut.toml")?);
+        builder.add(Glob::new("Cargo.toml")?);
 
         Ok(builder.build()?)
     }
